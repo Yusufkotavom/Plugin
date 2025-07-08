@@ -7,7 +7,7 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
-class KotacomAI_Database {
+class AI_Content_Gen_Database {
     
     private $wpdb;
     private $keywords_table;

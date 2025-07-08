@@ -7,7 +7,7 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
-class KotacomAI_API_Handler {
+class AI_Content_Gen_API_Handler {
     
     private $api_providers = array();
     
@@ -188,11 +188,11 @@ class KotacomAI_API_Handler {
      * Generate content using AI API
      */
     public function generate_content($prompt, $parameters = array()) {
-        $provider = get_option('kotacom_ai_api_provider', 'google_ai');
+        $provider = get_option('ai_content_gen_api_provider', 'google_ai');
         
         // Get API key from rotator
-        $kotacom_ai = kotacom_ai();
-        $api_key = $kotacom_ai->api_key_rotator->get_next_available_key($provider);
+        $plugin = ai_content_generator();
+        $api_key = $plugin->api_key_rotator->get_next_available_key($provider);
         
         if (empty($api_key)) {
             return array(
@@ -256,7 +256,7 @@ class KotacomAI_API_Handler {
             }
             
             // Check if error indicates rate limiting and we can rotate
-            $rotation_result = $kotacom_ai->api_key_rotator->handle_api_error($provider, $result['error']);
+            $rotation_result = $plugin->api_key_rotator->handle_api_error($provider, $result['error']);
             
             if ($rotation_result['rotated']) {
                 // Get the new API key and try again

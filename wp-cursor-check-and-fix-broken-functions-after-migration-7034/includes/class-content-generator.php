@@ -1,342 +1,273 @@
 <?php
 /**
- * Content generator class - Enhanced with Provider Selection Support
+ * Optimized Content Generator class
  */
 
 if (!defined('ABSPATH')) {
     exit;
 }
 
-class KotacomAI_Content_Generator {
+class AI_Content_Gen_Content_Generator {
     
     private $database;
     private $api_handler;
-    private $queue_manager;
     
     public function __construct() {
-        $this->database = new KotacomAI_Database();
-        $this->api_handler = new KotacomAI_API_Handler();
-        $this->queue_manager = new KotacomAI_Queue_Manager();
+        $this->database = new AI_Content_Gen_Database();
+        $this->api_handler = new AI_Content_Gen_API_Handler();
     }
     
     /**
-     * Generate content for keywords with provider selection support
+     * Generate optimized content with lower token usage
      */
-    public function generate_content($keywords, $prompt_template, $parameters, $post_settings, $provider_override = null) {
-        // Validate inputs
-        if (empty($keywords) || empty($prompt_template)) {
-            return array(
-                'success' => false,
-                'message' => __('Keywords and prompt template are required', 'kotacom-ai')
-            );
-        }
+    public function generate_content($keyword, $parameters = array()) {
+        // Set defaults
+        $defaults = array(
+            'content_type' => 'article',
+            'tone' => 'informative',
+            'length' => 'medium',
+            'audience' => 'general',
+            'language' => 'English',
+            'style' => 'standard',
+            'post_type' => 'post',
+            'post_status' => 'draft'
+        );
         
-        // Handle provider override
-        $original_provider = null;
-        $original_model = null; // Initialize original_model
-        if (!empty($provider_override['provider'])) {
-            $original_provider = get_option('kotacom_ai_api_provider');
-            update_option('kotacom_ai_api_provider', $provider_override['provider']);
-            
-            // Also set model if provided
-            if (!empty($provider_override['model'])) {
-                $model_option = 'kotacom_ai_' . $provider_override['provider'] . '_model';
-                $original_model = get_option($model_option);
-                update_option($model_option, $provider_override['model']);
-            }
-        }
+        $params = wp_parse_args($parameters, $defaults);
         
-        // Fire before generation hook
-        do_action('kotacom_ai_before_content_generation', $keywords, $prompt_template, $parameters, $post_settings, $provider_override);
+        // Build optimized prompt with minimal tokens
+        $prompt = $this->build_optimized_prompt($keyword, $params);
         
-        try {
-            if (count($keywords) === 1) {
-                // Single keyword - process immediately
-                $result = $this->process_single_keyword($keywords[0], $prompt_template, $parameters, $post_settings);
-                
-                $response = array(
-                    'success' => $result['success'],
-                    'message' => $result['message'],
-                    'provider_used' => $provider_override['provider'] ?? get_option('kotacom_ai_api_provider'),
-                    'results' => array(
-                        array(
-                            'keyword' => $keywords[0],
-                            'status' => $result['success'] ? 'completed' : 'error',
-                            'message' => $result['message'],
-                            'post_id' => $result['post_id'] ?? null
-                        )
-                    )
-                );
-            } else {
-                // Multiple keywords - use background processor
-                $response = $this->queue_manager->add_to_queue($keywords, $prompt_template, $parameters, $post_settings);
-                $response['provider_used'] = $provider_override['provider'] ?? get_option('kotacom_ai_api_provider');
-            }
-            
-        } catch (Exception $e) {
-            $response = array(
-                'success' => false,
-                'message' => __('Generation failed: ', 'kotacom-ai') . $e->getMessage()
-            );
-        } finally {
-            // Restore original provider settings
-            if ($original_provider !== null) {
-                update_option('kotacom_ai_api_provider', $original_provider);
-                
-                if (!empty($provider_override['model']) && isset($original_model)) {
-                    $model_option = 'kotacom_ai_' . $provider_override['provider'] . '_model';
-                    update_option($model_option, $original_model);
-                }
-            }
-        }
+        // Generate content
+        $result = $this->api_handler->generate_content($prompt, $params);
         
-        return $response;
-    }
-    
-    /**
-     * Process single keyword immediately with enhanced error handling
-     */
-    private function process_single_keyword($keyword, $prompt_template, $parameters, $post_settings) {
-        // Replace {keyword} in prompt template
-        $prompt = str_replace('{keyword}', $keyword, $prompt_template);
-        
-        // Apply filters to prompt
-        $prompt = apply_filters('kotacom_ai_prompt_template', $prompt, $keyword, $parameters);
-        
-        // Handle unlimited length
-        if (isset($parameters['length']) && $parameters['length'] === 'unlimited') {
-            // Remove length restrictions for unlimited mode
-            unset($parameters['length']);
-            $parameters['unlimited'] = true;
-        }
-        
-        // Generate content using AI API with fallback support
-        $api_result = $this->generate_with_fallback($prompt, $parameters);
-        
-        if (!$api_result['success']) {
-            KotacomAI_Logger::add('generate', 0, null, $api_result['error']);
-            return array(
-                'success' => false,
-                'message' => $api_result['error']
-            );
-        }
-        
-        // Apply filters to generated content
-        $content = apply_filters('kotacom_ai_generated_content', $api_result['content'], $keyword, $parameters);
-        
-        // Create WordPress post
-        $post_id = $this->create_wordpress_post($keyword, $content, $post_settings);
-        
-        if ($post_id) {
-            KotacomAI_Logger::add('generate', 1, $post_id, 'OK');
-            return array(
-                'success' => true,
-                'message' => sprintf(__('Content generated and post created (ID: %d)', 'kotacom-ai'), $post_id),
-                'post_id' => $post_id
-            );
-        } else {
-            KotacomAI_Logger::add('generate', 0, null, 'Failed to create post');
-            return array(
-                'success' => false,
-                'message' => __('Content generated but failed to create post', 'kotacom-ai')
-            );
-        }
-    }
-    
-    /**
-     * Generate content with automatic fallback to alternative providers
-     */
-    private function generate_with_fallback($prompt, $parameters) {
-        $current_provider = get_option('kotacom_ai_api_provider');
-        $providers = $this->api_handler->get_providers();
-        
-        // Try current provider first
-        $result = $this->api_handler->generate_content($prompt, $parameters);
-        
-        if ($result['success']) {
+        if (!$result['success']) {
             return $result;
         }
         
-        // If current provider fails, try fallback providers
-        $fallback_providers = $this->get_fallback_providers($current_provider);
+        // Process the generated content
+        $content = $this->process_generated_content($result['content'], $keyword, $params);
         
-        foreach ($fallback_providers as $fallback_provider) {
-            // Check if fallback provider is configured
-            $api_key = get_option('kotacom_ai_' . $fallback_provider . '_api_key');
-            if (empty($api_key)) {
-                continue;
-            }
-            
-            // Temporarily switch to fallback provider
-            update_option('kotacom_ai_api_provider', $fallback_provider);
-            
-            $fallback_result = $this->api_handler->generate_content($prompt, $parameters);
-            
-            if ($fallback_result['success']) {
-                // Log successful fallback
-                $this->log_fallback_success($current_provider, $fallback_provider);
-                
-                // Restore original provider
-                update_option('kotacom_ai_api_provider', $current_provider);
-                
-                return array(
-                    'success' => true,
-                    'content' => $fallback_result['content'],
-                    'fallback_used' => $fallback_provider
-                );
-            }
-        }
+        // Create WordPress post
+        $post_id = $this->create_post($keyword, $content, $params);
         
-        // Restore original provider
-        update_option('kotacom_ai_api_provider', $current_provider);
-        
-        // All providers failed
-        return array(
-            'success' => false,
-            'error' => sprintf(__('All providers failed. Last error: %s', 'kotacom-ai'), $result['error'])
-        );
-    }
-    
-    /**
-     * Get fallback providers based on current provider
-     */
-    private function get_fallback_providers($current_provider) {
-        // Define fallback hierarchy based on reliability and free tiers
-        $fallback_hierarchy = array(
-            'google_ai' => array('groq', 'cohere', 'huggingface', 'together', 'openrouter', 'perplexity'),
-            'groq' => array('google_ai', 'cohere', 'together', 'huggingface', 'openrouter', 'perplexity'),
-            'openai' => array('anthropic', 'google_ai', 'groq', 'openrouter', 'perplexity'),
-            'anthropic' => array('openai', 'google_ai', 'groq', 'openrouter', 'perplexity'),
-            'cohere' => array('google_ai', 'groq', 'huggingface', 'openrouter', 'perplexity'),
-            'huggingface' => array('google_ai', 'groq', 'cohere', 'openrouter', 'perplexity'),
-            'together' => array('google_ai', 'groq', 'cohere', 'openrouter', 'perplexity'),
-            'replicate' => array('google_ai', 'groq', 'together', 'openrouter', 'perplexity'),
-            'openrouter' => array('google_ai', 'groq', 'openai', 'anthropic', 'perplexity'), // Prioritize other paid/reliable ones
-            'perplexity' => array('google_ai', 'groq', 'openai', 'anthropic', 'openrouter') // Prioritize other paid/reliable ones
-        );
-        
-        return $fallback_hierarchy[$current_provider] ?? array('google_ai', 'groq', 'openrouter', 'perplexity');
-    }
-    
-    /**
-     * Log successful fallback for analytics
-     */
-    private function log_fallback_success($original_provider, $fallback_provider) {
-        $log_entry = array(
-            'timestamp' => current_time('mysql'),
-            'original_provider' => $original_provider,
-            'fallback_provider' => $fallback_provider,
-            'user_id' => get_current_user_id()
-        );
-        
-        // Store in transient for admin notice
-        set_transient('kotacom_ai_fallback_notice', $log_entry, 300); // 5 minutes
-        
-        // Log for debugging if enabled
-        if (defined('KOTACOM_AI_DEBUG') && KOTACOM_AI_DEBUG) {
-                error_log('Kotacom AI: Fallback successful - ' . $original_provider . ' -> ' . $fallback_provider);
-        }
-    }
-    
-    /**
-     * Create WordPress post from generated content
-     */
-    private function create_wordpress_post($keyword, $content, $post_settings) {
-        // Generate title from keyword or content
-        $title = $this->generate_post_title($keyword, $content);
-        
-        // Prepare post data
-        $post_data = array(
-            'post_title' => $title,
-            'post_content' => $content,
-            'post_status' => $post_settings['post_status'] ?: 'draft',
-            'post_type' => $post_settings['post_type'] ?: 'post',
-            'post_author' => get_current_user_id() ?: 1,
-            'meta_input' => array(
-                'kotacom_ai_generated' => true,
-                'kotacom_ai_keyword' => $keyword,
-                'kotacom_ai_generated_at' => current_time('mysql'),
-                'kotacom_ai_provider_used' => get_option('kotacom_ai_api_provider')
-            )
-        );
-        
-        // Add categories
-        if (!empty($post_settings['categories'])) {
-            $post_data['post_category'] = array_map('intval', $post_settings['categories']);
-        }
-        
-        // Filter post data
-        $post_data = apply_filters('kotacom_ai_post_data', $post_data, $keyword, $content, $post_settings);
-        
-        // Insert post
-        $post_id = wp_insert_post($post_data);
-        
-        if ($post_id && !is_wp_error($post_id)) {
-            // Add tags
-            if (!empty($post_settings['tags'])) {
-                wp_set_post_tags($post_id, $post_settings['tags']);
-            }
-            
-            // Fire action hook
-            do_action('kotacom_ai_after_content_generation', $post_id, $keyword, $content, $post_settings);
-            
-            return $post_id;
-        }
-        
-        return false;
-    }
-    
-    /**
-     * Generate post title from keyword or content
-     */
-    private function generate_post_title($keyword, $content) {
-        // Try to extract title from content (look for first heading)
-        if (preg_match('/<h[1-6][^>]*>(.*?)<\/h[1-6]>/i', $content, $matches)) {
-            return wp_strip_all_tags($matches[1]);
-        }
-        
-        // Try to get first sentence
-        $sentences = preg_split('/[.!?]+/', wp_strip_all_tags($content));
-        if (!empty($sentences[0])) {
-            $title = trim($sentences[0]);
-            if (strlen($title) > 10 && strlen($title) < 100) {
-                return $title;
-            }
-        }
-        
-        // Fallback to keyword-based title
-        return ucwords(str_replace(array('-', '_'), ' ', $keyword));
-    }
-    
-    /**
-     * Get batch processing status
-     */
-    public function get_batch_status($batch_id) {
-        return $this->queue_manager->get_batch_status($batch_id);
-    }
-    
-    /**
-     * Check provider status and configuration
-     */
-    public function check_provider_status($provider) {
-        $api_key = get_option('kotacom_ai_' . $provider . '_api_key');
-        
-        if (empty($api_key)) {
+        if (!$post_id) {
             return array(
-                'configured' => false,
-                'status' => 'not_configured',
-                'message' => __('API key not configured', 'kotacom-ai')
+                'success' => false,
+                'error' => __('Failed to create post', 'ai-content-gen')
             );
         }
         
-        // Test connection
-        $test_result = $this->api_handler->test_api_connection($provider, $api_key);
-        
         return array(
-            'configured' => true,
-            'status' => $test_result['success'] ? 'connected' : 'error',
-            'message' => $test_result['success'] ? __('Ready to use', 'kotacom-ai') : $test_result['error']
+            'success' => true,
+            'post_id' => $post_id,
+            'keyword' => $keyword,
+            'content_preview' => wp_trim_words($content, 20),
+            'edit_link' => admin_url('post.php?action=edit&post=' . $post_id),
+            'view_link' => get_permalink($post_id)
         );
+    }
+    
+    /**
+     * Build optimized prompt with minimal token usage
+     */
+    private function build_optimized_prompt($keyword, $params) {
+        // Get word count target
+        $word_count = $this->get_word_count($params['length']);
+        
+        // Build compact, efficient prompt
+        $prompt = sprintf(
+            "Write a %s %s about '%s' in %s.\n\nSpecs:\n- %d words\n- %s tone\n- %s style\n- Audience: %s\n- Include: title, intro, 3 main sections, conclusion\n- Use H2/H3 headings\n- Add bullet points where helpful\n\nContent:",
+            $params['content_type'],
+            $params['language'] !== 'English' ? "in {$params['language']}" : '',
+            $keyword,
+            $params['language'],
+            $word_count,
+            $params['tone'],
+            $params['style'],
+            $params['audience']
+        );
+        
+        return $prompt;
+    }
+    
+    /**
+     * Process generated content for better formatting
+     */
+    private function process_generated_content($content, $keyword, $params) {
+        // Clean up content
+        $content = trim($content);
+        
+        // Ensure proper HTML formatting
+        $content = $this->format_html_content($content);
+        
+        // Add proper paragraph breaks
+        $content = wpautop($content);
+        
+        // Ensure content length is appropriate
+        $content = $this->adjust_content_length($content, $params['length']);
+        
+        return $content;
+    }
+    
+    /**
+     * Format content with proper HTML structure
+     */
+    private function format_html_content($content) {
+        // Convert markdown-style headers to HTML
+        $content = preg_replace('/^## (.+)$/m', '<h2>$1</h2>', $content);
+        $content = preg_replace('/^### (.+)$/m', '<h3>$1</h3>', $content);
+        $content = preg_replace('/^# (.+)$/m', '<h1>$1</h1>', $content);
+        
+        // Convert markdown lists to HTML
+        $content = preg_replace('/^\- (.+)$/m', '<li>$1</li>', $content);
+        $content = preg_replace('/(<li>.*<\/li>)/s', '<ul>$1</ul>', $content);
+        
+        // Clean up multiple consecutive breaks
+        $content = preg_replace('/\n{3,}/', "\n\n", $content);
+        
+        return $content;
+    }
+    
+    /**
+     * Adjust content length if needed
+     */
+    private function adjust_content_length($content, $length_setting) {
+        $word_count = str_word_count(strip_tags($content));
+        $target_count = $this->get_word_count($length_setting);
+        
+        // If content is significantly shorter, add a note
+        if ($word_count < ($target_count * 0.7)) {
+            $content .= "\n\n<p><em>Note: This content can be expanded with additional details, examples, or related information as needed.</em></p>";
+        }
+        
+        // If content is too long, don't truncate (better to have more content)
+        
+        return $content;
+    }
+    
+    /**
+     * Get target word count for length setting
+     */
+    private function get_word_count($length) {
+        switch ($length) {
+            case 'short':
+                return 300;
+            case 'medium':
+                return 600;
+            case 'long':
+                return 1000;
+            case 'extra_long':
+                return 1500;
+            default:
+                return 600;
+        }
+    }
+    
+    /**
+     * Create WordPress post
+     */
+    private function create_post($keyword, $content, $params) {
+        // Generate SEO-optimized title
+        $title = $this->generate_title($keyword, $params);
+        
+        $post_data = array(
+            'post_title' => $title,
+            'post_content' => $content,
+            'post_status' => $params['post_status'],
+            'post_type' => $params['post_type'],
+            'post_author' => get_current_user_id(),
+            'meta_input' => array(
+                'ai_content_gen_keyword' => $keyword,
+                'ai_content_gen_generated' => current_time('mysql'),
+                'ai_content_gen_params' => json_encode($params)
+            )
+        );
+        
+        $post_id = wp_insert_post($post_data);
+        
+        if (is_wp_error($post_id)) {
+            return false;
+        }
+        
+        // Add basic SEO meta if Yoast or RankMath not present
+        $this->add_basic_seo_meta($post_id, $keyword, $content);
+        
+        return $post_id;
+    }
+    
+    /**
+     * Generate SEO-optimized title
+     */
+    private function generate_title($keyword, $params) {
+        $templates = array(
+            'article' => array(
+                'Ultimate Guide to %s',
+                'Everything You Need to Know About %s',
+                'Complete %s Guide',
+                '%s: A Comprehensive Overview'
+            ),
+            'tutorial' => array(
+                'How to %s: Step-by-Step Guide',
+                '%s Tutorial for Beginners',
+                'Learn %s in Simple Steps',
+                'Master %s: Complete Tutorial'
+            ),
+            'review' => array(
+                '%s Review: Pros, Cons & Verdict',
+                'Honest %s Review',
+                '%s: Complete Review & Analysis',
+                'Is %s Worth It? Full Review'
+            ),
+            'blog_post' => array(
+                '%s: What You Need to Know',
+                'The Truth About %s',
+                '%s Explained Simply',
+                'Understanding %s Better'
+            ),
+            'news' => array(
+                'Latest %s News & Updates',
+                '%s: Recent Developments',
+                'Breaking: %s Updates',
+                '%s News Today'
+            ),
+            'opinion' => array(
+                'Why %s Matters',
+                'The Case for %s',
+                'My Take on %s',
+                '%s: A Different Perspective'
+            )
+        );
+        
+        $type = $params['content_type'];
+        if (!isset($templates[$type])) {
+            $type = 'article';
+        }
+        
+        $template = $templates[$type][array_rand($templates[$type])];
+        return sprintf($template, ucwords($keyword));
+    }
+    
+    /**
+     * Add basic SEO meta data
+     */
+    private function add_basic_seo_meta($post_id, $keyword, $content) {
+        // Check if SEO plugins are active
+        if (defined('WPSEO_VERSION') || class_exists('RankMath')) {
+            return; // Let the SEO plugin handle it
+        }
+        
+        // Generate meta description
+        $meta_description = wp_trim_words(strip_tags($content), 25);
+        if (strlen($meta_description) > 155) {
+            $meta_description = substr($meta_description, 0, 152) . '...';
+        }
+        
+        update_post_meta($post_id, '_meta_description', $meta_description);
+        update_post_meta($post_id, '_meta_keywords', $keyword);
+        
+        // Add focus keyword
+        update_post_meta($post_id, '_focus_keyword', $keyword);
     }
     
     /**
@@ -347,47 +278,90 @@ class KotacomAI_Content_Generator {
         
         $stats = array();
         
-        // Total AI generated posts
-        $stats['total_generated'] = $wpdb->get_var(
-            "SELECT COUNT(*) FROM {$wpdb->postmeta} WHERE meta_key = 'kotacom_ai_generated' AND meta_value = '1'"
+        // Total generated posts
+        $stats['total_posts'] = $wpdb->get_var(
+            "SELECT COUNT(*) FROM {$wpdb->postmeta} WHERE meta_key = 'ai_content_gen_generated'"
         );
         
-        // Generated posts by provider
-        $stats['by_provider'] = $wpdb->get_results(
-            "SELECT pm.meta_value as provider, COUNT(*) as count 
-             FROM {$wpdb->postmeta} pm1
-             INNER JOIN {$wpdb->postmeta} pm ON pm1.post_id = pm.post_id 
-             WHERE pm1.meta_key = 'kotacom_ai_generated' AND pm1.meta_value = '1'
-             AND pm.meta_key = 'kotacom_ai_provider_used'
-             GROUP BY pm.meta_value",
+        // Posts generated today
+        $stats['posts_today'] = $wpdb->get_var(
+            $wpdb->prepare(
+                "SELECT COUNT(*) FROM {$wpdb->postmeta} WHERE meta_key = 'ai_content_gen_generated' AND DATE(meta_value) = %s",
+                current_time('Y-m-d')
+            )
+        );
+        
+        // Posts generated this week
+        $stats['posts_week'] = $wpdb->get_var(
+            $wpdb->prepare(
+                "SELECT COUNT(*) FROM {$wpdb->postmeta} WHERE meta_key = 'ai_content_gen_generated' AND meta_value >= %s",
+                date('Y-m-d', strtotime('-7 days'))
+            )
+        );
+        
+        // Most used keywords
+        $stats['top_keywords'] = $wpdb->get_results(
+            "SELECT meta_value as keyword, COUNT(*) as count 
+             FROM {$wpdb->postmeta} 
+             WHERE meta_key = 'ai_content_gen_keyword' 
+             GROUP BY meta_value 
+             ORDER BY count DESC 
+             LIMIT 5",
             ARRAY_A
         );
-        
-        // Generated posts by status
-        $stats['by_status'] = $wpdb->get_results(
-            "SELECT p.post_status, COUNT(*) as count 
-             FROM {$wpdb->posts} p 
-             INNER JOIN {$wpdb->postmeta} pm ON p.ID = pm.post_id 
-             WHERE pm.meta_key = 'kotacom_ai_generated' AND pm.meta_value = '1' 
-             GROUP BY p.post_status",
-            ARRAY_A
-        );
-        
-        // Generated posts by date (last 30 days)
-        $stats['by_date'] = $wpdb->get_results(
-            "SELECT DATE(p.post_date) as date, COUNT(*) as count 
-             FROM {$wpdb->posts} p 
-             INNER JOIN {$wpdb->postmeta} pm ON p.ID = pm.post_id 
-             WHERE pm.meta_key = 'kotacom_ai_generated' AND pm.meta_value = '1' 
-             AND p.post_date >= DATE_SUB(NOW(), INTERVAL 30 DAY)
-             GROUP BY DATE(p.post_date) 
-             ORDER BY date DESC",
-            ARRAY_A
-        );
-        
-        // Queue statistics
-        $stats['queue'] = $this->queue_manager->get_queue_stats();
         
         return $stats;
+    }
+    
+    /**
+     * Validate content parameters
+     */
+    public function validate_parameters($params) {
+        $errors = array();
+        
+        // Required parameters
+        if (empty($params['keyword'])) {
+            $errors[] = __('Keyword is required', 'ai-content-gen');
+        }
+        
+        // Validate content type
+        $valid_types = array('article', 'blog_post', 'tutorial', 'review', 'news', 'opinion');
+        if (!in_array($params['content_type'], $valid_types)) {
+            $errors[] = __('Invalid content type', 'ai-content-gen');
+        }
+        
+        // Validate tone
+        $valid_tones = array('professional', 'informative', 'casual', 'creative', 'persuasive');
+        if (!in_array($params['tone'], $valid_tones)) {
+            $errors[] = __('Invalid tone', 'ai-content-gen');
+        }
+        
+        // Validate length
+        $valid_lengths = array('short', 'medium', 'long', 'extra_long');
+        if (!in_array($params['length'], $valid_lengths)) {
+            $errors[] = __('Invalid length setting', 'ai-content-gen');
+        }
+        
+        return $errors;
+    }
+    
+    /**
+     * Estimate token usage for a request
+     */
+    public function estimate_tokens($keyword, $params) {
+        $prompt = $this->build_optimized_prompt($keyword, $params);
+        $word_count = str_word_count($prompt);
+        
+        // Rough estimation: 1 word ≈ 1.3 tokens
+        $input_tokens = ceil($word_count * 1.3);
+        
+        // Estimated output tokens based on target length
+        $output_tokens = ceil($this->get_word_count($params['length']) * 1.3);
+        
+        return array(
+            'input_tokens' => $input_tokens,
+            'output_tokens' => $output_tokens,
+            'total_tokens' => $input_tokens + $output_tokens
+        );
     }
 }

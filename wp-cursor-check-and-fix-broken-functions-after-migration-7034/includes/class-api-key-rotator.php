@@ -8,7 +8,7 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
-class KotacomAI_API_Key_Rotator {
+class AI_Content_Gen_API_Key_Rotator {
     
     private $rate_limit_errors = array(
         'quota exceeded',
@@ -38,12 +38,12 @@ class KotacomAI_API_Key_Rotator {
         }
         
         // Get current active key index
-        $active_index = get_option("kotacom_ai_{$provider}_active_key_index", 0);
+        $active_index = get_option("ai_content_gen_{$provider}_active_key_index", 0);
         
         // Validate index exists
         if (!isset($keys[$active_index])) {
             $active_index = 0;
-            update_option("kotacom_ai_{$provider}_active_key_index", 0);
+            update_option("ai_content_gen_{$provider}_active_key_index", 0);
         }
         
         return isset($keys[$active_index]) ? $keys[$active_index] : false;
@@ -54,11 +54,11 @@ class KotacomAI_API_Key_Rotator {
      */
     public function get_provider_keys($provider) {
         // Get multiple keys (new format)
-        $multiple_keys = get_option("kotacom_ai_{$provider}_api_keys", array());
+        $multiple_keys = get_option("ai_content_gen_{$provider}_api_keys", array());
         
         // Fallback to single key (legacy format)
         if (empty($multiple_keys)) {
-            $single_key = get_option("kotacom_ai_{$provider}_api_key", '');
+            $single_key = get_option("ai_content_gen_{$provider}_api_key", '');
             if (!empty($single_key)) {
                 return array($single_key);
             }
@@ -87,7 +87,7 @@ class KotacomAI_API_Key_Rotator {
         }
         
         $keys[] = $api_key;
-        update_option("kotacom_ai_{$provider}_api_keys", $keys);
+        update_option("ai_content_gen_{$provider}_api_keys", $keys);
         
         return true;
     }
@@ -105,12 +105,12 @@ class KotacomAI_API_Key_Rotator {
         unset($keys[$index]);
         $keys = array_values($keys); // Re-index array
         
-        update_option("kotacom_ai_{$provider}_api_keys", $keys);
+        update_option("ai_content_gen_{$provider}_api_keys", $keys);
         
         // Reset active index if it's out of bounds
-        $active_index = get_option("kotacom_ai_{$provider}_active_key_index", 0);
+        $active_index = get_option("ai_content_gen_{$provider}_active_key_index", 0);
         if ($active_index >= count($keys)) {
-            update_option("kotacom_ai_{$provider}_active_key_index", 0);
+            update_option("ai_content_gen_{$provider}_active_key_index", 0);
         }
         
         return true;
@@ -126,10 +126,10 @@ class KotacomAI_API_Key_Rotator {
             return false; // No keys to rotate to
         }
         
-        $current_index = get_option("kotacom_ai_{$provider}_active_key_index", 0);
+        $current_index = get_option("ai_content_gen_{$provider}_active_key_index", 0);
         $next_index = ($current_index + 1) % count($keys);
         
-        update_option("kotacom_ai_{$provider}_active_key_index", $next_index);
+        update_option("ai_content_gen_{$provider}_active_key_index", $next_index);
         
         // Log the rotation
         $this->log_key_rotation($provider, $current_index, $next_index, $reason);
@@ -186,7 +186,7 @@ class KotacomAI_API_Key_Rotator {
      * Set cooldown for API key
      */
     private function set_key_cooldown($provider, $key_index, $duration = 3600) {
-        $cooldown_key = "kotacom_ai_{$provider}_key_{$key_index}_cooldown";
+        $cooldown_key = "ai_content_gen_{$provider}_key_{$key_index}_cooldown";
         set_transient($cooldown_key, time(), $duration);
     }
     
@@ -194,7 +194,7 @@ class KotacomAI_API_Key_Rotator {
      * Check if API key is in cooldown
      */
     public function is_key_in_cooldown($provider, $key_index) {
-        $cooldown_key = "kotacom_ai_{$provider}_key_{$key_index}_cooldown";
+        $cooldown_key = "ai_content_gen_{$provider}_key_{$key_index}_cooldown";
         return get_transient($cooldown_key) !== false;
     }
     
@@ -209,7 +209,7 @@ class KotacomAI_API_Key_Rotator {
             return false;
         }
         
-        $current_index = get_option("kotacom_ai_{$provider}_active_key_index", 0);
+        $current_index = get_option("ai_content_gen_{$provider}_active_key_index", 0);
         
         // Try each key starting from current
         for ($i = 0; $i < $total_keys; $i++) {
@@ -218,7 +218,7 @@ class KotacomAI_API_Key_Rotator {
             if (!$this->is_key_in_cooldown($provider, $check_index)) {
                 // Update active index if we found a different key
                 if ($check_index !== $current_index) {
-                    update_option("kotacom_ai_{$provider}_active_key_index", $check_index);
+                    update_option("ai_content_gen_{$provider}_active_key_index", $check_index);
                 }
                 return $keys[$check_index];
             }
@@ -240,13 +240,13 @@ class KotacomAI_API_Key_Rotator {
             'reason' => $reason
         );
         
-        $log = get_option('kotacom_ai_key_rotation_log', array());
+        $log = get_option('ai_content_gen_key_rotation_log', array());
         array_unshift($log, $log_entry);
         
         // Keep only last 100 entries
         $log = array_slice($log, 0, 100);
         
-        update_option('kotacom_ai_key_rotation_log', $log);
+        update_option('ai_content_gen_key_rotation_log', $log);
         
         // Also log via WordPress if debug is enabled
         if (defined('KOTACOM_AI_DEBUG') && KOTACOM_AI_DEBUG) {
@@ -258,7 +258,7 @@ class KotacomAI_API_Key_Rotator {
      * Get rotation statistics
      */
     public function get_rotation_stats($provider = null) {
-        $log = get_option('kotacom_ai_key_rotation_log', array());
+        $log = get_option('ai_content_gen_key_rotation_log', array());
         
         if ($provider) {
             $log = array_filter($log, function($entry) use ($provider) {
@@ -306,11 +306,11 @@ class KotacomAI_API_Key_Rotator {
         $results = array();
         
         // Temporarily store current active key
-        $original_active = get_option("kotacom_ai_{$provider}_active_key_index", 0);
+        $original_active = get_option("ai_content_gen_{$provider}_active_key_index", 0);
         
         foreach ($keys as $index => $key) {
             // Set this key as active temporarily
-            update_option("kotacom_ai_{$provider}_active_key_index", $index);
+            update_option("ai_content_gen_{$provider}_active_key_index", $index);
             
             // Test the key
             $api_handler = new KotacomAI_API_Handler();
@@ -325,7 +325,7 @@ class KotacomAI_API_Key_Rotator {
         }
         
         // Restore original active key
-        update_option("kotacom_ai_{$provider}_active_key_index", $original_active);
+        update_option("ai_content_gen_{$provider}_active_key_index", $original_active);
         
         return $results;
     }
@@ -337,11 +337,11 @@ class KotacomAI_API_Key_Rotator {
         $providers = array('google_ai', 'openai', 'groq', 'anthropic', 'cohere', 'huggingface', 'together', 'replicate', 'openrouter', 'perplexity');
         
         foreach ($providers as $provider) {
-            $single_key = get_option("kotacom_ai_{$provider}_api_key", '');
-            $multiple_keys = get_option("kotacom_ai_{$provider}_api_keys", array());
+            $single_key = get_option("ai_content_gen_{$provider}_api_key", '');
+            $multiple_keys = get_option("ai_content_gen_{$provider}_api_keys", array());
             
             if (!empty($single_key) && empty($multiple_keys)) {
-                update_option("kotacom_ai_{$provider}_api_keys", array($single_key));
+                update_option("ai_content_gen_{$provider}_api_keys", array($single_key));
                 // Don't delete the old key yet for compatibility
             }
         }
